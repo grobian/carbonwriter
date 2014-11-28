@@ -102,7 +102,7 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 			continue
 		}
 
-		logger.Logf("metric: %s, value: %f, ts: %d", metric, value, ts)
+		logger.Debugf("metric: %s, value: %f, ts: %d", metric, value, ts)
 
 		// do what we want to do
 		path := config.WhisperData + "/" + strings.Replace(metric, ".", "/", -1) + ".wsp"
