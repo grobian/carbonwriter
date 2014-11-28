@@ -12,12 +12,14 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	cfg "github.com/alyu/configparser"
 	"github.com/dgryski/httputil"
 	whisper "github.com/grobian/go-whisper"
 	"github.com/lestrrat/go-file-rotatelogs"
@@ -60,7 +62,7 @@ var BuildVersion string = "(development build)"
 
 var logger logLevel
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageAggregation) {
 	bufconn := bufio.NewReader(conn)
 
 	for {
@@ -106,8 +108,31 @@ func handleConnection(conn net.Conn) {
 		path := config.WhisperData + "/" + strings.Replace(metric, ".", "/", -1) + ".wsp"
 		w, err := whisper.Open(path)
 		if err != nil {
-			// TODO: create a new metric
-			continue // for the time being
+			var retentions whisper.Retentions
+			for _, s := range schemas {
+				retentions = s.retentions
+				if s.pattern.MatchString(metric) {
+					break
+				}
+			}
+
+			// http://graphite.readthedocs.org/en/latest/config-carbon.html#storage-aggregation-conf
+			var aggr whisper.AggregationMethod = whisper.Average
+			var xfilesf float32 = 0.5
+			for _, a := range aggrs {
+				if a.pattern.MatchString(metric) {
+					aggr = a.aggregationMethod
+					xfilesf = float32(a.xFilesFactor)
+					break
+				}
+			}
+			logger.Logf("creating %s", path)
+			w, err = whisper.Create(path, retentions, aggr, xfilesf)
+			if err != nil {
+				logger.Logf("failed to create new whisper file %s: %s",
+					path, err.Error())
+				continue
+			}
 		}
 
 		w.Update(value, int(ts))
@@ -115,7 +140,7 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
-func listenAndServe(listen string) {
+func listenAndServe(listen string, schemas []*StorageSchema, aggrs []*StorageAggregation) {
 	l, err := net.Listen("tcp", listen)
 	if err != nil {
 		logger.Logf("failed to listen on %s: %s", listen, err.Error())
@@ -128,8 +153,107 @@ func listenAndServe(listen string) {
 			logger.Logf("failed to accept connection: %s", err.Error())
 			continue
 		}
-		go handleConnection(conn)
+		go handleConnection(conn, schemas, aggrs)
 	}
+}
+
+type StorageSchema struct {
+	name       string
+	pattern    *regexp.Regexp
+	retentions whisper.Retentions
+}
+
+func readStorageSchemas(file string) ([]*StorageSchema, error) {
+	config, err := cfg.Read(file)
+	if err != nil {
+		return nil, err
+	}
+
+	sections, err := config.AllSections()
+	if err != nil {
+		return nil, err
+	}
+
+	var ret []*StorageSchema
+	for _, s := range sections {
+		var sschema StorageSchema
+		// this is mildly stupid, but I don't feel like forking
+		// configparser just for this
+		sschema.name =
+			strings.Trim(strings.SplitN(s.String(), "\n", 2)[0], " []")
+		sschema.pattern, err = regexp.Compile(s.ValueOf("pattern"))
+		if err != nil {
+			logger.Logf("failed to parse pattern '%s'for [%s]: %s",
+				s.ValueOf("pattern"), sschema.name, err.Error())
+			continue
+		}
+		sschema.retentions, err = whisper.ParseRetentionDefs(s.ValueOf("retentions"))
+
+		ret = append(ret, &sschema)
+	}
+
+	return ret, nil
+}
+
+type StorageAggregation struct {
+	name              string
+	pattern           *regexp.Regexp
+	xFilesFactor      float64
+	aggregationMethod whisper.AggregationMethod
+}
+
+func readStorageAggregations(file string) ([]*StorageAggregation, error) {
+	config, err := cfg.Read(file)
+	if err != nil {
+		return nil, err
+	}
+
+	sections, err := config.AllSections()
+	if err != nil {
+		return nil, err
+	}
+
+	var ret []*StorageAggregation
+	for _, s := range sections {
+		var saggr StorageAggregation
+		// this is mildly stupid, but I don't feel like forking
+		// configparser just for this
+		saggr.name =
+			strings.Trim(strings.SplitN(s.String(), "\n", 2)[0], " []")
+		saggr.pattern, err = regexp.Compile(s.ValueOf("pattern"))
+		if err != nil {
+			logger.Logf("failed to parse pattern '%s'for [%s]: %s",
+				s.ValueOf("pattern"), saggr.name, err.Error())
+			continue
+		}
+		saggr.xFilesFactor, err = strconv.ParseFloat(s.ValueOf("xFilesFactor"), 64)
+		if err != nil {
+			logger.Logf("failed to parse xFilesFactor '%s': %s",
+				s.ValueOf("xFilesFactor"), err.Error())
+			continue
+		}
+
+		switch s.ValueOf("aggregationMethod") {
+		case "average", "avg":
+			saggr.aggregationMethod = whisper.Average
+		case "sum":
+			saggr.aggregationMethod = whisper.Sum
+		case "last":
+			saggr.aggregationMethod = whisper.Last
+		case "max":
+			saggr.aggregationMethod = whisper.Max
+		case "min":
+			saggr.aggregationMethod = whisper.Min
+		default:
+			logger.Logf("unknown aggregation method '%s'",
+				s.ValueOf("aggregationMethod"))
+			continue
+		}
+
+		ret = append(ret, &saggr)
+	}
+
+	return ret, nil
 }
 
 func main() {
@@ -140,6 +264,8 @@ func main() {
 	whisperdata := flag.String("w", config.WhisperData, "location where whisper files are stored")
 	maxprocs := flag.Int("maxprocs", runtime.NumCPU()*80/100, "GOMAXPROCS")
 	logdir := flag.String("logdir", "/var/log/carbonwriter/", "logging directory")
+	schemafile := flag.String("schemafile", "/etc/carbon/storage-schemas.conf", "storage-schemas.conf location")
+	aggrfile := flag.String("aggrfile", "/etc/carbon/storage-aggregation.conf", "storage-aggregation.conf location")
 	logtostdout := flag.Bool("stdout", false, "log also to stdout")
 
 	flag.Parse()
@@ -170,8 +296,22 @@ func main() {
 
 	logger = logLevel(loglevel)
 
+	schemas, err := readStorageSchemas(*schemafile)
+	if err != nil {
+		logger.Logf("failed to read %s: %s", schemafile, err.Error())
+		os.Exit(1)
+	}
+
+	aggrs, err := readStorageAggregations(*aggrfile)
+	if err != nil {
+		logger.Logf("failed to read %s: %s", schemafile, err.Error())
+		os.Exit(1)
+	}
+
 	config.WhisperData = strings.TrimRight(*whisperdata, "/")
-	logger.Logf("writing whisper files from: %s", config.WhisperData)
+	logger.Logf("writing whisper files to: %s", config.WhisperData)
+	logger.Logf("reading storage schemas from: %s", schemafile)
+	logger.Logf("reading aggregation rules from: %s", aggrfile)
 
 	runtime.GOMAXPROCS(*maxprocs)
 	logger.Logf("set GOMAXPROCS=%d", *maxprocs)
@@ -214,8 +354,8 @@ func main() {
 	listen := fmt.Sprintf(":%d", *port)
 	httplisten := fmt.Sprintf(":%d", *reportport)
 	logger.Logf("listening on %s, statistics via %s", listen, httplisten)
-	go listenAndServe(listen)
-	err := http.ListenAndServe(httplisten, nil)
+	go listenAndServe(listen, schemas, aggrs)
+	err = http.ListenAndServe(httplisten, nil)
 	if err != nil {
 		log.Fatalf("%s", err)
 	}
