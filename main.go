@@ -87,7 +87,8 @@ func handleConnection(conn net.Conn) {
 			continue
 		}
 
-		tsf, err := strconv.ParseFloat(strings.TrimRight(elems[2], "\n"), 64)
+		elems[2] = strings.TrimRight(elems[2], "\n")
+		tsf, err := strconv.ParseFloat(elems[2], 64)
 		if err != nil {
 			logger.Logf("invalid timestamp '%s': %s", elems[2], err.Error())
 			continue
