@@ -108,26 +108,49 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 		path := config.WhisperData + "/" + strings.Replace(metric, ".", "/", -1) + ".wsp"
 		w, err := whisper.Open(path)
 		if err != nil {
-			var retentions whisper.Retentions
+			var schema *StorageSchema = nil
 			for _, s := range schemas {
-				retentions = s.retentions
 				if s.pattern.MatchString(metric) {
+					schema = s
+					break
+				}
+			}
+			if schema == nil {
+				logger.Logf("no storage schema defined for %s", metric)
+				continue
+			}
+			logger.Debugf("%s: found schema: %s", metric, schema.name)
+
+			var aggr *StorageAggregation = nil
+			for _, a := range aggrs {
+				if a.pattern.MatchString(metric) {
+					aggr = a
 					break
 				}
 			}
 
 			// http://graphite.readthedocs.org/en/latest/config-carbon.html#storage-aggregation-conf
-			var aggr whisper.AggregationMethod = whisper.Average
-			var xfilesf float32 = 0.5
-			for _, a := range aggrs {
-				if a.pattern.MatchString(metric) {
-					aggr = a.aggregationMethod
-					xfilesf = float32(a.xFilesFactor)
-					break
-				}
+			aggrName := "(default)"
+			aggrStr := "average"
+			aggrType := whisper.Average
+			xfilesf := float32(0.5)
+			if aggr != nil {
+				aggrName = aggr.name
+				aggrStr = aggr.aggregationMethodStr
+				aggrType = aggr.aggregationMethod
+				xfilesf = float32(aggr.xFilesFactor)
 			}
-			logger.Logf("creating %s", path)
-			w, err = whisper.Create(path, retentions, aggr, xfilesf)
+
+			logger.Logf("creating %s: %s, retention: %s (section %s), aggregationMethod: %s, xFilesFactor: %f (section %s)",
+				metric, path, schema.retentionStr, schema.name,
+				aggrStr, xfilesf, aggrName)
+
+			// whisper.Create doesn't mkdir, so let's do it ourself
+			lastslash := strings.LastIndex(path, "/")
+			if lastslash != -1 {
+				os.MkdirAll(path[0:lastslash], os.ModeDir|os.ModePerm)
+			}
+			w, err = whisper.Create(path, schema.retentions, aggrType, xfilesf)
 			if err != nil {
 				logger.Logf("failed to create new whisper file %s: %s",
 					path, err.Error())
@@ -158,9 +181,10 @@ func listenAndServe(listen string, schemas []*StorageSchema, aggrs []*StorageAgg
 }
 
 type StorageSchema struct {
-	name       string
-	pattern    *regexp.Regexp
-	retentions whisper.Retentions
+	name         string
+	pattern      *regexp.Regexp
+	retentionStr string
+	retentions   whisper.Retentions
 }
 
 func readStorageSchemas(file string) ([]*StorageSchema, error) {
@@ -181,13 +205,19 @@ func readStorageSchemas(file string) ([]*StorageSchema, error) {
 		// configparser just for this
 		sschema.name =
 			strings.Trim(strings.SplitN(s.String(), "\n", 2)[0], " []")
+		if sschema.name == "" {
+			continue
+		}
 		sschema.pattern, err = regexp.Compile(s.ValueOf("pattern"))
 		if err != nil {
 			logger.Logf("failed to parse pattern '%s'for [%s]: %s",
 				s.ValueOf("pattern"), sschema.name, err.Error())
 			continue
 		}
-		sschema.retentions, err = whisper.ParseRetentionDefs(s.ValueOf("retentions"))
+		sschema.retentionStr = s.ValueOf("retentions")
+		sschema.retentions, err = whisper.ParseRetentionDefs(sschema.retentionStr)
+		logger.Debugf("adding schema [%s] pattern = %s retentions = %s",
+			sschema.name, s.ValueOf("pattern"), sschema.retentionStr)
 
 		ret = append(ret, &sschema)
 	}
@@ -196,10 +226,11 @@ func readStorageSchemas(file string) ([]*StorageSchema, error) {
 }
 
 type StorageAggregation struct {
-	name              string
-	pattern           *regexp.Regexp
-	xFilesFactor      float64
-	aggregationMethod whisper.AggregationMethod
+	name                 string
+	pattern              *regexp.Regexp
+	xFilesFactor         float64
+	aggregationMethodStr string
+	aggregationMethod    whisper.AggregationMethod
 }
 
 func readStorageAggregations(file string) ([]*StorageAggregation, error) {
@@ -220,6 +251,9 @@ func readStorageAggregations(file string) ([]*StorageAggregation, error) {
 		// configparser just for this
 		saggr.name =
 			strings.Trim(strings.SplitN(s.String(), "\n", 2)[0], " []")
+		if saggr.name == "" {
+			continue
+		}
 		saggr.pattern, err = regexp.Compile(s.ValueOf("pattern"))
 		if err != nil {
 			logger.Logf("failed to parse pattern '%s'for [%s]: %s",
@@ -228,12 +262,13 @@ func readStorageAggregations(file string) ([]*StorageAggregation, error) {
 		}
 		saggr.xFilesFactor, err = strconv.ParseFloat(s.ValueOf("xFilesFactor"), 64)
 		if err != nil {
-			logger.Logf("failed to parse xFilesFactor '%s': %s",
-				s.ValueOf("xFilesFactor"), err.Error())
+			logger.Logf("failed to parse xFilesFactor '%s' in %s: %s",
+				s.ValueOf("xFilesFactor"), saggr.name, err.Error())
 			continue
 		}
 
-		switch s.ValueOf("aggregationMethod") {
+		saggr.aggregationMethodStr = s.ValueOf("aggregationMethod")
+		switch saggr.aggregationMethodStr {
 		case "average", "avg":
 			saggr.aggregationMethod = whisper.Average
 		case "sum":
@@ -250,6 +285,9 @@ func readStorageAggregations(file string) ([]*StorageAggregation, error) {
 			continue
 		}
 
+		logger.Debugf("adding aggregation [%s] pattern = %s aggregationMethod = %s xFilesFactor = %f",
+			saggr.name, s.ValueOf("pattern"),
+			saggr.aggregationMethodStr, saggr.xFilesFactor)
 		ret = append(ret, &saggr)
 	}
 
@@ -310,8 +348,8 @@ func main() {
 
 	config.WhisperData = strings.TrimRight(*whisperdata, "/")
 	logger.Logf("writing whisper files to: %s", config.WhisperData)
-	logger.Logf("reading storage schemas from: %s", schemafile)
-	logger.Logf("reading aggregation rules from: %s", aggrfile)
+	logger.Logf("reading storage schemas from: %s", *schemafile)
+	logger.Logf("reading aggregation rules from: %s", *aggrfile)
 
 	runtime.GOMAXPROCS(*maxprocs)
 	logger.Logf("set GOMAXPROCS=%d", *maxprocs)
