@@ -132,6 +132,7 @@ func listenAndServe(listen string) {
 
 func main() {
 	port := flag.Int("p", 2003, "port to bind to")
+	reportport := flag.Int("reportport", 8080, "port to bind http report interface to")
 	verbose := flag.Bool("v", false, "enable verbose logging")
 	debug := flag.Bool("vv", false, "enable more verbose (debug) logging")
 	whisperdata := flag.String("w", config.WhisperData, "location where whisper files are stored")
@@ -209,9 +210,10 @@ func main() {
 	}
 
 	listen := fmt.Sprintf(":%d", *port)
-	logger.Logf("listening on %s, statistics via :8080", listen)
+	httplisten := fmt.Sprintf(":%d", *reportport)
+	logger.Logf("listening on %s, statistics via %s", listen, httplisten)
 	go listenAndServe(listen)
-	err := http.ListenAndServe(":8080", nil)
+	err := http.ListenAndServe(httplisten, nil)
 	if err != nil {
 		log.Fatalf("%s", err)
 	}
