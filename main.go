@@ -87,11 +87,12 @@ func handleConnection(conn net.Conn) {
 			continue
 		}
 
-		ts, err := strconv.ParseInt(strings.TrimRight(elems[2], "\n"), 10, 32)
+		tsf, err := strconv.ParseFloat(strings.TrimRight(elems[2], "\n"), 64)
 		if err != nil {
 			logger.Logf("invalid timestamp '%s': %s", elems[2], err.Error())
 			continue
 		}
+		ts := int(tsf)
 
 		if metric == "" || ts == 0 {
 			logger.Logf("invalid line: %s", string(line))
