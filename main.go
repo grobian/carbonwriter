@@ -97,8 +97,13 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 		}
 		ts := int(tsf)
 
-		if metric == "" || ts == 0 {
+		if metric == "" {
 			logger.Logf("invalid line: %s", string(line))
+			continue
+		}
+
+		if ts == 0 {
+			logger.Logf("invalid timestamp (0): %s", string(line))
 			continue
 		}
 
