@@ -6,7 +6,9 @@ Simple whisper file writer.
 This project aims to be a replacement of the carbon-cache.py daemon which writes incoming metrics to disk in whisper files.
 
 The main reason to build a replacement is performance.  At the time of
-this writing, there is nothing to be said for sure about it, though.
+this writing, the performance in terms of disk I/O is worse though.  The
+behaviour in terms of CPU (and load average) is better and stable,
+unlike carbon-cache.py.
 
 For retrieval of metrics from whisper files, see carbonserver.  For
 combining the output of multiple servers (using carbonserver) see
