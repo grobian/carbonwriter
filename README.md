@@ -15,6 +15,8 @@ combining the output of multiple servers (using carbonserver) see
 carbonzipper.  For operations on the metric data, such as understood by
 the graphite-web frontend, see carbonapi.
 
+We do not use this software.
+
 
 Author
 ------
