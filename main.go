@@ -341,13 +341,13 @@ func main() {
 
 	schemas, err := readStorageSchemas(*schemafile)
 	if err != nil {
-		logger.Logf("failed to read %s: %s", schemafile, err.Error())
+		logger.Logf("failed to read %s: %s", *schemafile, err.Error())
 		os.Exit(1)
 	}
 
 	aggrs, err := readStorageAggregations(*aggrfile)
 	if err != nil {
-		logger.Logf("failed to read %s: %s", schemafile, err.Error())
+		logger.Logf("failed to read %s: %s", *schemafile, err.Error())
 		os.Exit(1)
 	}
 
