@@ -347,7 +347,7 @@ func main() {
 
 	aggrs, err := readStorageAggregations(*aggrfile)
 	if err != nil {
-		logger.Logf("failed to read %s: %s", *schemafile, err.Error())
+		logger.Logf("failed to read %s: %s", *aggrfile, err.Error())
 		os.Exit(1)
 	}
 
