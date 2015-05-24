@@ -109,6 +109,13 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 
 		logger.Debugf("metric: %s, value: %f, ts: %d", metric, value, ts)
 
+		// catch panics from whisper-go library
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Logf("recovering from whisper panic:", r)
+			}
+		}()
+
 		// do what we want to do
 		path := config.WhisperData + "/" + strings.Replace(metric, ".", "/", -1) + ".wsp"
 		w, err := whisper.Open(path)
