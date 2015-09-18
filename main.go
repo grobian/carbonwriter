@@ -307,8 +307,8 @@ func readStorageAggregations(file string) ([]*StorageAggregation, error) {
 }
 
 func main() {
-	port := flag.Int("p", 2003, "port to bind to")
-	reportport := flag.Int("reportport", 8080, "port to bind http report interface to")
+	addr := flag.String("a", ":2003", "address to bind to")
+	reportaddr := flag.String("reportaddr", ":8080", "address to bind http report interface to")
 	verbose := flag.Bool("v", false, "enable verbose logging")
 	debug := flag.Bool("vv", false, "enable more verbose (debug) logging")
 	whisperdata := flag.String("w", config.WhisperData, "location where whisper files are stored")
@@ -401,11 +401,9 @@ func main() {
 		}
 	}
 
-	listen := fmt.Sprintf(":%d", *port)
-	httplisten := fmt.Sprintf(":%d", *reportport)
-	logger.Logf("listening on %s, statistics via %s", listen, httplisten)
-	go listenAndServe(listen, schemas, aggrs)
-	err = http.ListenAndServe(httplisten, nil)
+	logger.Logf("listening on %s, statistics via %s", *addr, *reportaddr)
+	go listenAndServe(*addr, schemas, aggrs)
+	err = http.ListenAndServe(*reportaddr, nil)
 	if err != nil {
 		log.Fatalf("%s", err)
 	}
