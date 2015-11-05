@@ -112,7 +112,7 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 		// catch panics from whisper-go library
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Logf("recovering from whisper panic:", r)
+				logger.Logf("recovering from whisper panic (metric: %s): %v", metric, r)
 			}
 		}()
 
