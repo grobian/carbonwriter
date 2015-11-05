@@ -113,6 +113,10 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 		defer func() {
 			if r := recover(); r != nil {
 				logger.Logf("recovering from whisper panic (metric: %s): %v", metric, r)
+				err := conn.Close()
+				if err != nil {
+					logger.Logf("error while closing connection after whisper panic")
+				}
 			}
 		}()
 
