@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -16,7 +15,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	cfg "github.com/alyu/configparser"
@@ -39,23 +37,9 @@ var config = struct {
 
 // grouped expvars for /debug/vars and graphite
 var Metrics = struct {
-	RenderRequests *expvar.Int
-	RenderErrors   *expvar.Int
-	NotFound       *expvar.Int
-	FindRequests   *expvar.Int
-	FindErrors     *expvar.Int
-	FindZero       *expvar.Int
-	InfoRequests   *expvar.Int
-	InfoErrors     *expvar.Int
+	MetricsReceived *expvar.Int
 }{
-	RenderRequests: expvar.NewInt("render_requests"),
-	RenderErrors:   expvar.NewInt("render_errors"),
-	NotFound:       expvar.NewInt("notfound"),
-	FindRequests:   expvar.NewInt("find_requests"),
-	FindErrors:     expvar.NewInt("find_errors"),
-	FindZero:       expvar.NewInt("find_zero"),
-	InfoRequests:   expvar.NewInt("info_requests"),
-	InfoErrors:     expvar.NewInt("info_errors"),
+	MetricsReceived: expvar.NewInt("metrics_received"),
 }
 
 var BuildVersion string = "(development build)"
@@ -176,6 +160,8 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 
 		w.Update(value, int(ts))
 		w.Close()
+
+		Metrics.MetricsReceived.Add(1)
 	}
 }
 
@@ -360,10 +346,6 @@ func main() {
 	logger.Logf("set GOMAXPROCS=%d", *maxprocs)
 
 	httputil.PublishTrackedConnections("httptrack")
-	expvar.Publish("requestBuckets", expvar.Func(renderTimeBuckets))
-
-	// +1 to track every over the number of buckets we track
-	timeBuckets = make([]int64, config.Buckets+1)
 
 	// nothing in the config? check the environment
 	if config.GraphiteHost == "" {
@@ -386,12 +368,7 @@ func main() {
 		hostname, _ := os.Hostname()
 		hostname = strings.Replace(hostname, ".", "_", -1)
 
-		//		graphite.Register(fmt.Sprintf("carbon.writer.%s.metricsReceived",
-		//			hostname), Metrics.received)
-
-		for i := 0; i <= config.Buckets; i++ {
-			graphite.Register(fmt.Sprintf("carbon.writer.%s.write_in_%dms_to_%dms", hostname, i*100, (i+1)*100), bucketEntry(i))
-		}
+		graphite.Register(fmt.Sprintf("carbon.writer.%s.metricsReceived", hostname), Metrics.MetricsReceived)
 	}
 
 	listen := fmt.Sprintf(":%d", *port)
@@ -403,35 +380,4 @@ func main() {
 		log.Fatalf("%s", err)
 	}
 	logger.Logf("stopped")
-}
-
-var timeBuckets []int64
-
-type bucketEntry int
-
-func (b bucketEntry) String() string {
-	return strconv.Itoa(int(atomic.LoadInt64(&timeBuckets[b])))
-}
-
-func renderTimeBuckets() interface{} {
-	return timeBuckets
-}
-
-func bucketRequestTimes(req *http.Request, t time.Duration) {
-
-	ms := t.Nanoseconds() / int64(time.Millisecond)
-
-	bucket := int(math.Log(float64(ms)) * math.Log10E)
-
-	if bucket < 0 {
-		bucket = 0
-	}
-
-	if bucket < config.Buckets {
-		atomic.AddInt64(&timeBuckets[bucket], 1)
-	} else {
-		// Too big? Increment overflow bucket and log
-		atomic.AddInt64(&timeBuckets[config.Buckets], 1)
-		logger.Logf("Slow Request: %s: %s", t.String(), req.URL.String())
-	}
 }
