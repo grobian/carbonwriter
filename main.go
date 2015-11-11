@@ -115,7 +115,7 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 				logger.Logf("recovering from whisper panic (metric: %s): %v", metric, r)
 				err := conn.Close()
 				if err != nil {
-					logger.Logf("error while closing connection after whisper panic")
+					logger.Logf("error while closing connection after whisper panic: %v", err)
 				}
 			}
 		}()
