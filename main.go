@@ -27,12 +27,8 @@ import (
 var config = struct {
 	WhisperData  string
 	GraphiteHost string
-	MaxGlobs     int
-	Buckets      int
 }{
 	WhisperData: "/var/lib/carbon/whisper",
-	MaxGlobs:    10,
-	Buckets:     10,
 }
 
 // grouped expvars for /debug/vars and graphite
