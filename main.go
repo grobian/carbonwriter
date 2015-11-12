@@ -38,7 +38,7 @@ var Metrics = struct {
 	MetricsReceived: expvar.NewInt("metrics_received"),
 }
 
-var BuildVersion string = "(development build)"
+var BuildVersion = "(development build)"
 
 var logger mlog.Level
 
@@ -103,62 +103,83 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 		// do what we want to do
 		path := config.WhisperData + "/" + strings.Replace(metric, ".", "/", -1) + ".wsp"
 		w, err := whisper.Open(path)
-		if err != nil {
-			var schema *StorageSchema = nil
-			for _, s := range schemas {
-				if s.pattern.MatchString(metric) {
-					schema = s
-					break
-				}
-			}
-			if schema == nil {
-				logger.Logf("no storage schema defined for %s", metric)
+		if err != nil && os.IsNotExist(err) {
+			w = createMetric(metric, path, schemas, aggrs)
+			if w == nil {
 				continue
 			}
-			logger.Debugf("%s: found schema: %s", metric, schema.name)
-
-			var aggr *StorageAggregation = nil
-			for _, a := range aggrs {
-				if a.pattern.MatchString(metric) {
-					aggr = a
-					break
-				}
-			}
-
-			// http://graphite.readthedocs.org/en/latest/config-carbon.html#storage-aggregation-conf
-			aggrName := "(default)"
-			aggrStr := "average"
-			aggrType := whisper.Average
-			xfilesf := float32(0.5)
-			if aggr != nil {
-				aggrName = aggr.name
-				aggrStr = aggr.aggregationMethodStr
-				aggrType = aggr.aggregationMethod
-				xfilesf = float32(aggr.xFilesFactor)
-			}
-
-			logger.Logf("creating %s: %s, retention: %s (section %s), aggregationMethod: %s, xFilesFactor: %f (section %s)",
-				metric, path, schema.retentionStr, schema.name,
-				aggrStr, xfilesf, aggrName)
-
-			// whisper.Create doesn't mkdir, so let's do it ourself
-			lastslash := strings.LastIndex(path, "/")
-			if lastslash != -1 {
-				os.MkdirAll(path[0:lastslash], os.ModeDir|os.ModePerm)
-			}
-			w, err = whisper.Create(path, schema.retentions, aggrType, xfilesf)
-			if err != nil {
-				logger.Logf("failed to create new whisper file %s: %s",
-					path, err.Error())
-				continue
-			}
+		} else if err != nil {
+			// some other error
+			logger.Logf("failed to open whisper file %s: %v", path, err)
+			continue
 		}
 
-		w.Update(value, int(ts))
+		err = w.Update(value, int(ts))
+		if err != nil {
+			logger.Logf("failed to update whisper file %s: %v", path, err)
+		}
 		w.Close()
 
 		Metrics.MetricsReceived.Add(1)
 	}
+}
+
+func createMetric(metric, path string, schemas []*StorageSchema, aggrs []*StorageAggregation) *whisper.Whisper {
+	var schema *StorageSchema
+	for _, s := range schemas {
+		if s.pattern.MatchString(metric) {
+			schema = s
+			break
+		}
+	}
+	if schema == nil {
+		logger.Logf("no storage schema defined for %s", metric)
+		return nil
+	}
+	logger.Debugf("%s: found schema: %s", metric, schema.name)
+
+	var aggr *StorageAggregation
+	for _, a := range aggrs {
+		if a.pattern.MatchString(metric) {
+			aggr = a
+			break
+		}
+	}
+
+	// http://graphite.readthedocs.org/en/latest/config-carbon.html#storage-aggregation-conf
+	aggrName := "(default)"
+	aggrStr := "average"
+	aggrType := whisper.Average
+	xfilesf := float32(0.5)
+	if aggr != nil {
+		aggrName = aggr.name
+		aggrStr = aggr.aggregationMethodStr
+		aggrType = aggr.aggregationMethod
+		xfilesf = float32(aggr.xFilesFactor)
+	}
+
+	logger.Logf("creating %s: %s, retention: %s (section %s), aggregationMethod: %s, xFilesFactor: %f (section %s)",
+		metric, path, schema.retentionStr, schema.name,
+		aggrStr, xfilesf, aggrName)
+
+	// whisper.Create doesn't mkdir, so let's do it ourself
+	lastslash := strings.LastIndex(path, "/")
+	if lastslash != -1 {
+		dir := path[0:lastslash]
+		err := os.MkdirAll(dir, os.ModeDir|os.ModePerm)
+		if err != nil {
+			logger.Logf("error during mkdir(%q): %v\n", dir, err)
+			return nil
+		}
+
+	}
+	w, err := whisper.Create(path, schema.retentions, aggrType, xfilesf)
+	if err != nil {
+		logger.Logf("failed to create new whisper file %s: %v", path, err)
+		return nil
+	}
+
+	return w
 }
 
 func listenAndServe(listen string, schemas []*StorageSchema, aggrs []*StorageAggregation) {
