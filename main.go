@@ -58,7 +58,7 @@ var BuildVersion = "(development build)"
 
 var logger mlog.Level
 
-func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageAggregation) {
+func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageAggregation, whiteRegexps []*regexp.Regexp,  blackRegexps []*regexp.Regexp) {
 	bufconn := bufio.NewReader(conn)
 
 	for {
@@ -78,6 +78,11 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 		}
 
 		metric := elems[0]
+
+		if !metricNameIsValid(metric, whiteRegexps, blackRegexps) {
+			continue
+		}
+
 
 		value, err := strconv.ParseFloat(elems[1], 64)
 		if err != nil {
@@ -198,7 +203,7 @@ func createMetric(metric, path string, schemas []*StorageSchema, aggrs []*Storag
 	return w
 }
 
-func listenAndServe(listen string, schemas []*StorageSchema, aggrs []*StorageAggregation) {
+func listenAndServe(listen string, schemas []*StorageSchema, aggrs []*StorageAggregation, whiteRegexps []*regexp.Regexp,  blackRegexps []*regexp.Regexp) {
 	l, err := net.Listen("tcp", listen)
 	if err != nil {
 		logger.Logf("failed to listen on %s: %s", listen, err.Error())
@@ -211,7 +216,7 @@ func listenAndServe(listen string, schemas []*StorageSchema, aggrs []*StorageAgg
 			logger.Logf("failed to accept connection: %s", err.Error())
 			continue
 		}
-		go handleConnection(conn, schemas, aggrs)
+		go handleConnection(conn, schemas, aggrs, whiteRegexps, blackRegexps)
 	}
 }
 
@@ -329,6 +334,53 @@ func readStorageAggregations(file string) ([]*StorageAggregation, error) {
 	return ret, nil
 }
 
+func readRegexpList(file string) []*regexp.Regexp {
+	f, err := os.Open(file)
+	if err != nil {
+		logger.Logf("Warning: %s", string(err.Error()))
+		return nil
+	}
+
+	regexps := make([]*regexp.Regexp, 0)
+	reader := bufio.NewReader(f)
+	for str := ""; err==nil; str, err = reader.ReadString('\n') {
+		if str == "" {
+			continue
+		}
+		regexps = append(regexps, regexp.MustCompile(strings.Replace(str,"\n", "", -1)))
+	}
+	return regexps
+}
+
+
+func metricNameIsValid(metric string, whiteRegexps []*regexp.Regexp,  blackRegexps []*regexp.Regexp) bool {
+	// We need to check if our metric matches compiled regexp from whitelist file
+	metricIsWhitelisted := false
+	for _, reg := range(whiteRegexps) {
+		if reg.MatchString(metric) {
+			metricIsWhitelisted = true
+		}
+	}
+	if len(whiteRegexps) != 0 && !metricIsWhitelisted {
+		logger.Logf("metric '%s' does not match whitelist regexp", metric)
+		return false
+	}
+
+	var matchedRegexp *regexp.Regexp
+	for _, reg := range(blackRegexps) {
+		if reg.MatchString(metric) {
+			matchedRegexp = reg
+			break
+		}
+	}
+	if matchedRegexp != nil {
+		logger.Logf("metric '%s' matches blacklist regexp '%s'", metric, matchedRegexp)
+		return false
+	}
+
+	return true
+}
+
 func main() {
 	port := flag.Int("p", 2003, "port to bind to")
 	reportport := flag.Int("reportport", 8080, "port to bind http report interface to")
@@ -339,6 +391,8 @@ func main() {
 	logdir := flag.String("logdir", "/var/log/carbonwriter/", "logging directory")
 	schemafile := flag.String("schemafile", "/etc/carbon/storage-schemas.conf", "storage-schemas.conf location")
 	aggrfile := flag.String("aggrfile", "/etc/carbon/storage-aggregation.conf", "storage-aggregation.conf location")
+	whitelistfile := flag.String("whitefile", "/etc/carbon/whitelist.conf", "whitelist.conf location")
+	blacklistfile := flag.String("blackfile", "/etc/carbon/blacklist.conf", "blacklist.conf location")
 	logtostdout := flag.Bool("stdout", false, "log also to stdout")
 
 	flag.Parse()
@@ -369,6 +423,9 @@ func main() {
 		logger.Logf("failed to read %s: %s", *aggrfile, err.Error())
 		os.Exit(1)
 	}
+
+	whiteRegexps := readRegexpList(*whitelistfile)
+	blackRegexps := readRegexpList(*blacklistfile)
 
 	config.WhisperData = strings.TrimRight(*whisperdata, "/")
 	logger.Logf("writing whisper files to: %s", config.WhisperData)
@@ -404,7 +461,7 @@ func main() {
 	listen := fmt.Sprintf(":%d", *port)
 	httplisten := fmt.Sprintf(":%d", *reportport)
 	logger.Logf("listening on %s, statistics via %s", listen, httplisten)
-	go listenAndServe(listen, schemas, aggrs)
+	go listenAndServe(listen, schemas, aggrs, whiteRegexps, blackRegexps)
 	err = http.ListenAndServe(httplisten, nil)
 	if err != nil {
 		log.Fatalf("%s", err)
