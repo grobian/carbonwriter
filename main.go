@@ -83,7 +83,6 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 			continue
 		}
 
-
 		value, err := strconv.ParseFloat(elems[1], 64)
 		if err != nil {
 			logger.Logf("invalue value '%s': %s", elems[1], err.Error())
