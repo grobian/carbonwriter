@@ -343,7 +343,8 @@ func readRegexpList(file string) []*regexp.Regexp {
 	regexps := make([]*regexp.Regexp, 0)
 	reader := bufio.NewReader(f)
 	for str := ""; err == nil; str, err = reader.ReadString('\n') {
-		if str == "" {
+		// Ignore empty lines in file
+		if str == "" || str == "\n" {
 			continue
 		}
 		regexps = append(regexps, regexp.MustCompile(strings.Replace(str, "\n", "", -1)))
