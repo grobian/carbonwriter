@@ -37,7 +37,7 @@ import (
 	"github.com/dgryski/carbonzipper/mlog"
 	"github.com/dgryski/httputil"
 	whisper "github.com/grobian/go-whisper"
-	g2g "github.com/peterbourgon/g2g"
+	"github.com/peterbourgon/g2g"
 )
 
 var config = struct {
