@@ -58,7 +58,7 @@ var BuildVersion = "(development build)"
 
 var logger mlog.Level
 
-func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageAggregation, whiteRegexps []*regexp.Regexp,  blackRegexps []*regexp.Regexp) {
+func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageAggregation, whiteRegexps []*regexp.Regexp, blackRegexps []*regexp.Regexp) {
 	bufconn := bufio.NewReader(conn)
 
 	for {
@@ -202,7 +202,7 @@ func createMetric(metric, path string, schemas []*StorageSchema, aggrs []*Storag
 	return w
 }
 
-func listenAndServe(listen string, schemas []*StorageSchema, aggrs []*StorageAggregation, whiteRegexps []*regexp.Regexp,  blackRegexps []*regexp.Regexp) {
+func listenAndServe(listen string, schemas []*StorageSchema, aggrs []*StorageAggregation, whiteRegexps []*regexp.Regexp, blackRegexps []*regexp.Regexp) {
 	l, err := net.Listen("tcp", listen)
 	if err != nil {
 		logger.Logf("failed to listen on %s: %s", listen, err.Error())
@@ -342,20 +342,19 @@ func readRegexpList(file string) []*regexp.Regexp {
 
 	regexps := make([]*regexp.Regexp, 0)
 	reader := bufio.NewReader(f)
-	for str := ""; err==nil; str, err = reader.ReadString('\n') {
+	for str := ""; err == nil; str, err = reader.ReadString('\n') {
 		if str == "" {
 			continue
 		}
-		regexps = append(regexps, regexp.MustCompile(strings.Replace(str,"\n", "", -1)))
+		regexps = append(regexps, regexp.MustCompile(strings.Replace(str, "\n", "", -1)))
 	}
 	return regexps
 }
 
-
-func metricNameIsValid(metric string, whiteRegexps []*regexp.Regexp,  blackRegexps []*regexp.Regexp) bool {
+func metricNameIsValid(metric string, whiteRegexps []*regexp.Regexp, blackRegexps []*regexp.Regexp) bool {
 	// We need to check if our metric matches compiled regexp from whitelist file
 	metricIsWhitelisted := false
-	for _, reg := range(whiteRegexps) {
+	for _, reg := range whiteRegexps {
 		if reg.MatchString(metric) {
 			metricIsWhitelisted = true
 		}
@@ -366,7 +365,7 @@ func metricNameIsValid(metric string, whiteRegexps []*regexp.Regexp,  blackRegex
 	}
 
 	var matchedRegexp *regexp.Regexp
-	for _, reg := range(blackRegexps) {
+	for _, reg := range blackRegexps {
 		if reg.MatchString(metric) {
 			matchedRegexp = reg
 			break
