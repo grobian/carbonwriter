@@ -60,11 +60,16 @@ var logger mlog.Level
 
 func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageAggregation, whiteRegexps []*regexp.Regexp, blackRegexps []*regexp.Regexp) {
 	bufconn := bufio.NewReader(conn)
+	defer func() {
+		conn.Close()
+		if r := recover(); r != nil {
+			logger.Logf("recovering from whisper panic:", r)
+		}
+	}()
 
 	for {
 		line, err := bufconn.ReadString('\n')
 		if err != nil {
-			conn.Close()
 			if err != io.EOF {
 				logger.Logf("read failed: %s", err.Error())
 			}
@@ -107,17 +112,6 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 		}
 
 		logger.Debugf("metric: %s, value: %f, ts: %d", metric, value, ts)
-
-		// catch panics from whisper-go library
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Logf("recovering from whisper panic (metric: %s): %v", metric, r)
-				err := conn.Close()
-				if err != nil {
-					logger.Logf("error while closing connection after whisper panic: %v", err)
-				}
-			}
-		}()
 
 		// do what we want to do
 		path := config.WhisperData + "/" + strings.Replace(metric, ".", "/", -1) + ".wsp"
