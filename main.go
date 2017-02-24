@@ -62,7 +62,7 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 	bufconn := bufio.NewReader(conn)
 
 	for {
-		line, err := bufconn.ReadBytes('\n')
+		line, err := bufconn.ReadString('\n')
 		if err != nil {
 			conn.Close()
 			if err != io.EOF {
@@ -71,15 +71,19 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 			break
 		}
 
-		elems := strings.Split(string(line), " ")
+		elems := strings.Split(line, " ")
 		if len(elems) != 3 {
-			logger.Logf("invalid line: %s", string(line))
+			logger.Logf("invalid line: %s", line)
 			continue
 		}
 
 		metric := elems[0]
+		if metric == "" {
+			logger.Logf("invalid line: %s", line)
+			continue
+		}
 
-		if !metricNameIsValid(metric, whiteRegexps, blackRegexps) {
+		if !metricNameIsValid([]byte(metric), whiteRegexps, blackRegexps) {
 			continue
 		}
 
@@ -95,15 +99,10 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 			logger.Logf("invalid timestamp '%s': %s", elems[2], err.Error())
 			continue
 		}
+
 		ts := int(tsf)
-
-		if metric == "" {
-			logger.Logf("invalid line: %s", string(line))
-			continue
-		}
-
 		if ts == 0 {
-			logger.Logf("invalid timestamp (0): %s", string(line))
+			logger.Logf("invalid timestamp (0): %s", line)
 			continue
 		}
 
@@ -124,7 +123,7 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 		path := config.WhisperData + "/" + strings.Replace(metric, ".", "/", -1) + ".wsp"
 		w, err := whisper.Open(path)
 		if err != nil && os.IsNotExist(err) {
-			w = createMetric(metric, path, schemas, aggrs)
+			w = createMetric([]byte(metric), path, schemas, aggrs)
 			if w == nil {
 				continue
 			}
@@ -144,10 +143,10 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 	}
 }
 
-func createMetric(metric, path string, schemas []*StorageSchema, aggrs []*StorageAggregation) *whisper.Whisper {
+func createMetric(metric []byte, path string, schemas []*StorageSchema, aggrs []*StorageAggregation) *whisper.Whisper {
 	var schema *StorageSchema
 	for _, s := range schemas {
-		if s.pattern.MatchString(metric) {
+		if s.pattern.Match(metric) {
 			schema = s
 			break
 		}
@@ -160,7 +159,7 @@ func createMetric(metric, path string, schemas []*StorageSchema, aggrs []*Storag
 
 	var aggr *StorageAggregation
 	for _, a := range aggrs {
-		if a.pattern.MatchString(metric) {
+		if a.pattern.Match(metric) {
 			aggr = a
 			break
 		}
@@ -339,6 +338,7 @@ func readRegexpList(file string) []*regexp.Regexp {
 		logger.Logf("Warning: %s", string(err.Error()))
 		return nil
 	}
+	defer f.Close()
 
 	regexps := make([]*regexp.Regexp, 0)
 	reader := bufio.NewReader(f)
@@ -352,12 +352,13 @@ func readRegexpList(file string) []*regexp.Regexp {
 	return regexps
 }
 
-func metricNameIsValid(metric string, whiteRegexps []*regexp.Regexp, blackRegexps []*regexp.Regexp) bool {
+func metricNameIsValid(metric []byte, whiteRegexps []*regexp.Regexp, blackRegexps []*regexp.Regexp) bool {
 	// We need to check if our metric matches compiled regexp from whitelist file
 	metricIsWhitelisted := false
 	for _, reg := range whiteRegexps {
-		if reg.MatchString(metric) {
+		if reg.Match(metric) {
 			metricIsWhitelisted = true
+			break
 		}
 	}
 	if len(whiteRegexps) != 0 && !metricIsWhitelisted {
@@ -365,16 +366,11 @@ func metricNameIsValid(metric string, whiteRegexps []*regexp.Regexp, blackRegexp
 		return false
 	}
 
-	var matchedRegexp *regexp.Regexp
 	for _, reg := range blackRegexps {
-		if reg.MatchString(metric) {
-			matchedRegexp = reg
-			break
+		if reg.Match(metric) {
+			logger.Logf("metric '%s' matches blacklist regexp '%s'", metric, reg)
+			return false
 		}
-	}
-	if matchedRegexp != nil {
-		logger.Logf("metric '%s' matches blacklist regexp '%s'", metric, matchedRegexp)
-		return false
 	}
 
 	return true
