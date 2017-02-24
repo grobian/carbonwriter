@@ -68,7 +68,7 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 			if err != io.EOF {
 				logger.Logf("read failed: %s", err.Error())
 			}
-			break
+			return
 		}
 
 		elems := strings.Split(line, " ")
