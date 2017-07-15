@@ -116,6 +116,8 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 		// do what we want to do
 		path := config.WhisperData + "/" + strings.Replace(metric, ".", "/", -1) + ".wsp"
 		w, err := whisper.Open(path)
+		defer w.Close()
+
 		if err != nil && os.IsNotExist(err) {
 			w = createMetric([]byte(metric), path, schemas, aggrs)
 			if w == nil {
@@ -131,7 +133,6 @@ func handleConnection(conn net.Conn, schemas []*StorageSchema, aggrs []*StorageA
 		if err != nil {
 			logger.Logf("failed to update whisper file %s: %v", path, err)
 		}
-		w.Close()
 
 		Metrics.MetricsReceived.Add(1)
 	}
