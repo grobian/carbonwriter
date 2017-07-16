@@ -374,6 +374,8 @@ func metricNameIsValid(metric []byte, whiteRegexps []*regexp.Regexp, blackRegexp
 func main() {
 	port := flag.Int("p", 2003, "port to bind to")
 	reportport := flag.Int("reportport", 8080, "port to bind http report interface to")
+	addr := flag.String("a", "", "address to bind to")
+	reportaddr := flag.String("reportaddr", "", "address to bind http report interface to")
 	verbose := flag.Bool("v", false, "enable verbose logging")
 	debug := flag.Bool("vv", false, "enable more verbose (debug) logging")
 	whisperdata := flag.String("w", config.WhisperData, "location where whisper files are stored")
@@ -448,8 +450,8 @@ func main() {
 		graphite.Register(fmt.Sprintf("carbon.writer.%s.metricsReceived", hostname), Metrics.MetricsReceived)
 	}
 
-	listen := fmt.Sprintf(":%d", *port)
-	httplisten := fmt.Sprintf(":%d", *reportport)
+	listen := fmt.Sprintf("%s:%d", *addr, *port)
+	httplisten := fmt.Sprintf("%s:%d", *reportaddr, *reportport)
 	logger.Logf("listening on %s, statistics via %s", listen, httplisten)
 	go listenAndServe(listen, schemas, aggrs, whiteRegexps, blackRegexps)
 	err = http.ListenAndServe(httplisten, nil)
