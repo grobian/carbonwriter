@@ -442,7 +442,10 @@ func main() {
 		logger.Logf("Using graphite host %v", config.GraphiteHost)
 
 		// register our metrics with graphite
-		graphite := g2g.NewGraphite(config.GraphiteHost, 60*time.Second, 10*time.Second)
+		graphite, err := g2g.NewGraphite(config.GraphiteHost, 60*time.Second, 10*time.Second)
+		if err != nil {
+			log.Fatalf("%s", err)
+		}
 
 		hostname, _ := os.Hostname()
 		hostname = strings.Replace(hostname, ".", "_", -1)
